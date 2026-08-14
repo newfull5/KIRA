@@ -14,6 +14,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."  # uv run은 프로젝트 루트에서 실행되어야 함
 
+# Vertex AI (Gemini) — ADC 인증(gcloud auth application-default login) 선행 필요
+export VERTEXAI_PROJECT="${VERTEXAI_PROJECT:-our-highway-505510-e5}"
+export VERTEXAI_LOCATION="${VERTEXAI_LOCATION:-global}"
+
 DISABLE_KIRA="${DISABLE_KIRA:-false}"
 
 echo "========================================"
@@ -25,11 +29,10 @@ uv run harbor run \
     --agent-import-path "terminus_kira.terminus_kira:TerminusKira" \
     -d "terminal-bench@2.0" \
     -t "$1" \
-    -m "anthropic/claude-sonnet-5" \
+    -m "vertex_ai/gemini-3.7-flash" \
     -e docker \
     -n 1 \
-    --ak disable_kira="$DISABLE_KIRA" \
-    --ak temperature=1  # claude-5 계열은 비기본 temperature(0.7)를 400으로 거부
+    --ak disable_kira="$DISABLE_KIRA"
 
 echo "========================================"
 echo "Task: $1 - Finished at $(date)"
