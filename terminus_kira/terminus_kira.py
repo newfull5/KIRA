@@ -256,7 +256,7 @@ class TerminusKira(Terminus2):
             marker = f"{_MARKER_PREFIX}{self._marker_seq}__"
             start = time.monotonic()
 
-            # TODO: tmux send key 가 너무 긴 코드를 넣어주면 truncated 되서 들어가는 문제
+            # TODO: tmux send key 가 너무 긴 코드를 넣어주면 안들어가는 문제
             for i in range(0, len(command.keystrokes), _SEND_CHUNK_BYTES):
                 await session.send_keys(
                     command.keystrokes[i:i + _SEND_CHUNK_BYTES],
