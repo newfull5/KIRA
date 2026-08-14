@@ -56,6 +56,7 @@ class BlockError(Exception):
 
 BLOCK_TIMEOUT_SEC = 600  # 10 minutes
 _MARKER_PREFIX = "__CMDEND__"  # Marker prefix for command completion detection
+_SEND_CHUNK_BYTES = 4000  # tmux send-keys rejects arguments over ~16KB
 
 
 @dataclass
@@ -255,12 +256,15 @@ class TerminusKira(Terminus2):
             marker = f"{_MARKER_PREFIX}{self._marker_seq}__"
             start = time.monotonic()
 
-            # Send the command
-            await session.send_keys(
-                command.keystrokes,
-                block=False,
-                min_timeout_sec=0.0,
-            )
+            # tmux send-keys rejects arguments over ~16KB with "command too long"
+            # and the non-blocking send path discards that failure, so an oversized
+            # command silently never reaches the terminal.
+            for i in range(0, len(command.keystrokes), _SEND_CHUNK_BYTES):
+                await session.send_keys(
+                    command.keystrokes[i:i + _SEND_CHUNK_BYTES],
+                    block=False,
+                    min_timeout_sec=0.0,
+                )
             # Send marker: will execute when shell returns after command
             await session.send_keys(
                 f"echo '{marker}'\n",
