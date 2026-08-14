@@ -263,18 +263,19 @@ class TerminusKira(Terminus2):
                     block=False,
                     min_timeout_sec=0.0,
                 )
-            # Send marker: will execute when shell returns after command
-            await session.send_keys(
-                f"echo '{marker}'\n",
-                block=False,
-                min_timeout_sec=0.0,
-            )
+            # TODO: 지우기 - 일부 줄바꿈 붙지 않는 response 가 있어서 marker가 커맨드 뒤에 이에붙음
+            send_marker = command.keystrokes.endswith("\n")
+            if send_marker:
+                await session.send_keys(
+                    f"echo '{marker}'\n",
+                    block=False,
+                    min_timeout_sec=0.0,
+                )
 
             # Poll for marker, exit early if found before duration
             await asyncio.sleep(min(0.3, command.duration_sec))
             while time.monotonic() - start < command.duration_sec:
-                pane_content = await session.capture_pane()
-                if marker in pane_content:
+                if send_marker and marker in await session.capture_pane():
                     break
                 await asyncio.sleep(0.5)
 
