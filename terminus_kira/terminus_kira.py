@@ -256,9 +256,7 @@ class TerminusKira(Terminus2):
             marker = f"{_MARKER_PREFIX}{self._marker_seq}__"
             start = time.monotonic()
 
-            # tmux send-keys rejects arguments over ~16KB with "command too long"
-            # and the non-blocking send path discards that failure, so an oversized
-            # command silently never reaches the terminal.
+            # TODO: tmux send key 가 너무 긴 코드를 넣어주면 truncated 되서 들어가는 문제
             for i in range(0, len(command.keystrokes), _SEND_CHUNK_BYTES):
                 await session.send_keys(
                     command.keystrokes[i:i + _SEND_CHUNK_BYTES],
