@@ -66,6 +66,7 @@ class ToolCallResponse:
     tool_calls: list[dict[str, Any]]
     reasoning_content: str | None = None
     usage: UsageInfo | None = None
+    finish_reason: str | None = None
 
 
 @dataclass
@@ -662,6 +663,7 @@ class TerminusKira(Terminus2):
             tool_calls=tool_calls,
             reasoning_content=reasoning_content,
             usage=usage_info,
+            finish_reason=finish_reason,
         )
 
     async def _handle_llm_interaction(
@@ -688,7 +690,15 @@ class TerminusKira(Terminus2):
 
         try:
             start_time = time.time()
-            tool_response = await self._call_llm_with_tools(messages)
+            # TODO: PR전에 지우기 주석 - Empty responses (no content, no tool calls) are retried
+            # TODO: 지우기: 아마도 illegal한거 물어봐서로 추정
+            for _ in range(3):
+                tool_response = await self._call_llm_with_tools(messages)
+                if tool_response.content or tool_response.tool_calls:
+                    break
+                self.logger.warning(
+                    f"Empty LLM response (finish_reason={tool_response.finish_reason}), retrying"
+                )
             end_time = time.time()
             request_time_ms = (end_time - start_time) * 1000
             self._api_request_times.append(request_time_ms)
@@ -698,8 +708,9 @@ class TerminusKira(Terminus2):
             if tool_response.tool_calls:
                 assistant_message["tool_calls"] = tool_response.tool_calls
 
-            chat._messages.append({"role": "user", "content": prompt})
-            chat._messages.append(assistant_message)
+            if tool_response.content or tool_response.tool_calls:
+                chat._messages.append({"role": "user", "content": prompt})
+                chat._messages.append(assistant_message)
 
             # Add tool result messages for each tool call (required by OpenAI API)
             if tool_response.tool_calls:
@@ -835,7 +846,8 @@ class TerminusKira(Terminus2):
         if response_path is not None:
             response_text = (
                 f"Content: {tool_response.content or ''}\n\n"
-                f"Tool Calls: {json.dumps(tool_response.tool_calls, indent=2)}"
+                f"Tool Calls: {json.dumps(tool_response.tool_calls, indent=2)}\n\n"
+                f"Finish Reason: {tool_response.finish_reason}"
             )
             response_path.write_text(response_text)
 
