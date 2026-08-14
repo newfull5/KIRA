@@ -846,8 +846,7 @@ class TerminusKira(Terminus2):
         if response_path is not None:
             response_text = (
                 f"Content: {tool_response.content or ''}\n\n"
-                f"Tool Calls: {json.dumps(tool_response.tool_calls, indent=2)}\n\n"
-                f"Finish Reason: {tool_response.finish_reason}"
+                f"Tool Calls: {json.dumps(tool_response.tool_calls, indent=2)}"
             )
             response_path.write_text(response_text)
 

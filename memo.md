@@ -3,6 +3,8 @@ hard에서 틀린거 8개
 ## model extraction relu logits
 - 이상하게 같은 턴이 계속 반복됨
 - 공회전이 많은데 파악이 필요
+- 일리걸한거 물어본다고 판단해서 계속 빈 응답 오고있는듯
+- model extraction 수상해보인은거 물어봐서 계속 빈 응답 오는거 맞음 -> 이거 문제는 지금 모델로 못품
 
 ## make doom for mips
 - 긴 코드를 한번에 작성하는데
@@ -21,10 +23,8 @@ hard에서 틀린거 8개
 
 ## protein-assembly
 - 에이전트 하네스 문제 없음 그냥 모델 역량 미달
+- 순수한 모델 역량문제, 코드를 잘 못짬
 
 ## configure git webserver
 - user@server 이거 보고 ssh로 실행한다는걸 눈썰미로 파악해야하는데, curl로 실행해버림
 - 이건 좀 애매한것이, 모델 역량 부족이라고 할수도 잇고, 문제가 명쾌하지 않다고 할수도있고
-
-## protein assmbly
-- 순수한 모델 역량문제, 코드를 잘 못짬
