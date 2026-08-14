@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import jsonschema
 import litellm
 from litellm.exceptions import (
     AuthenticationError as LiteLLMAuthenticationError,
@@ -211,6 +212,8 @@ TOOLS = [
         },
     },
 ]
+
+_TOOL_SCHEMAS = {t["function"]["name"]: t["function"]["parameters"] for t in TOOLS}
 
 
 class TerminusKira(Terminus2):
@@ -422,6 +425,21 @@ class TerminusKira(Terminus2):
                 self.logger.warning(f"Failed to parse tool arguments: {arguments_str}")
                 continue
 
+            # Missing/misnamed fields would otherwise be filled with defaults and
+            # silently no-op, which the model reads as a dead terminal rather than
+            # its own mistake. Validate against the schema we already advertise.
+            schema = _TOOL_SCHEMAS.get(function_name)
+            if schema is not None:
+                try:
+                    jsonschema.validate(arguments, schema)
+                except jsonschema.ValidationError as e:
+                    feedback = (
+                        f"WARNINGS: Invalid arguments for '{function_name}': "
+                        f"{e.message}. Nothing was executed."
+                    )
+                    self.logger.warning(feedback)
+                    continue
+
             if function_name == "execute_commands":
                 # Extract analysis and plan
                 analysis = arguments.get("analysis", "")
@@ -430,11 +448,10 @@ class TerminusKira(Terminus2):
                 # Extract commands array
                 cmds = arguments.get("commands", [])
                 for cmd in cmds:
-                    keystrokes = cmd.get("keystrokes", "")
                     duration = cmd.get("duration", 1.0)
                     commands.append(
                         Command(
-                            keystrokes=keystrokes,
+                            keystrokes=cmd["keystrokes"],
                             duration_sec=min(duration, 60),
                         )
                     )
