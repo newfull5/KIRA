@@ -219,7 +219,14 @@ class TerminusKira(Terminus2):
     TerminusKira uses the `tools` parameter in LLM API calls for structured outputs.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __new__(cls, *args, disable_kira: bool = False, **kwargs):
+        # ponytail: returning a plain Terminus2 skips every KIRA override at once;
+        # __init__ below is not called for the returned Terminus2 instance.
+        if disable_kira:
+            return Terminus2(*args, **kwargs)
+        return super().__new__(cls)
+
+    def __init__(self, *args, disable_kira: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self._marker_seq = 0
         self._total_time_saved = 0.0
