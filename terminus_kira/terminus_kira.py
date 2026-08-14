@@ -58,9 +58,7 @@ class BlockError(Exception):
 BLOCK_TIMEOUT_SEC = 600  # 10 minutes
 _MARKER_PREFIX = "__CMDEND__"  # Marker prefix for command completion detection
 _SEND_CHUNK_BYTES = 4000  # tmux send-keys rejects arguments over ~16KB
-# Ceiling, not a fixed wait: marker polling returns as soon as the command ends.
-# It only costs the full duration when the marker never appears (interactive
-# programs swallow the echo), so keep it well under the 1800s task budget.
+# TODO: 나중에 지우기 - 어차피 마커까지 다 붙어 있는 마당에 폴링 1분 씩 하는거 좀 llm call 낭비임. 5분으로 될 문제.
 _MAX_DURATION_SEC = 300
 
 
