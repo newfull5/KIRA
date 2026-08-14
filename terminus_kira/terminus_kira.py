@@ -58,6 +58,10 @@ class BlockError(Exception):
 BLOCK_TIMEOUT_SEC = 600  # 10 minutes
 _MARKER_PREFIX = "__CMDEND__"  # Marker prefix for command completion detection
 _SEND_CHUNK_BYTES = 4000  # tmux send-keys rejects arguments over ~16KB
+# Ceiling, not a fixed wait: marker polling returns as soon as the command ends.
+# It only costs the full duration when the marker never appears (interactive
+# programs swallow the echo), so keep it well under the 1800s task budget.
+_MAX_DURATION_SEC = 300
 
 
 @dataclass
@@ -114,7 +118,9 @@ _DURATION_DESC = (
     "It is better to set a smaller duration than a longer duration. "
     "It is always possible to wait again if the prior output has not finished, "
     "by running empty keystrokes with a duration on subsequent requests to wait longer. "
-    "Never wait longer than 60 seconds; prefer to poll to see intermediate result status."
+    "Waiting returns as soon as the command finishes, so a generous duration on a "
+    "genuinely slow command costs nothing. "
+    "Never wait longer than 300 seconds; prefer to poll to see intermediate result status."
 )
 
 _TASK_COMPLETE_DESC = "Call this when the task is complete."
@@ -452,7 +458,7 @@ class TerminusKira(Terminus2):
                     commands.append(
                         Command(
                             keystrokes=cmd["keystrokes"],
-                            duration_sec=min(duration, 60),
+                            duration_sec=min(duration, _MAX_DURATION_SEC),
                         )
                     )
             elif function_name == "task_complete":
