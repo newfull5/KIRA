@@ -193,3 +193,4 @@ evaluation/results/*builds/
 jobs*
 
 .omc/
+log.md
