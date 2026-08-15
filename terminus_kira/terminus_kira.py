@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import jsonschema
 import litellm
 from litellm.exceptions import (
     AuthenticationError as LiteLLMAuthenticationError,
@@ -57,9 +56,6 @@ class BlockError(Exception):
 
 BLOCK_TIMEOUT_SEC = 600  # 10 minutes
 _MARKER_PREFIX = "__CMDEND__"  # Marker prefix for command completion detection
-_SEND_CHUNK_BYTES = 4000  # tmux send-keys rejects arguments over ~16KB
-# TODO: 나중에 지우기 - 어차피 마커까지 다 붙어 있는 마당에 폴링 1분 씩 하는거 좀 llm call 낭비임. 5분으로 될 문제.
-_MAX_DURATION_SEC = 300
 
 
 @dataclass
@@ -70,7 +66,6 @@ class ToolCallResponse:
     tool_calls: list[dict[str, Any]]
     reasoning_content: str | None = None
     usage: UsageInfo | None = None
-    finish_reason: str | None = None
 
 
 @dataclass
@@ -116,9 +111,7 @@ _DURATION_DESC = (
     "It is better to set a smaller duration than a longer duration. "
     "It is always possible to wait again if the prior output has not finished, "
     "by running empty keystrokes with a duration on subsequent requests to wait longer. "
-    "Waiting returns as soon as the command finishes, so a generous duration on a "
-    "genuinely slow command costs nothing. "
-    "Never wait longer than 300 seconds; prefer to poll to see intermediate result status."
+    "Never wait longer than 60 seconds; prefer to poll to see intermediate result status."
 )
 
 _TASK_COMPLETE_DESC = "Call this when the task is complete."
@@ -217,8 +210,6 @@ TOOLS = [
     },
 ]
 
-_TOOL_SCHEMAS = {t["function"]["name"]: t["function"]["parameters"] for t in TOOLS}
-
 
 class TerminusKira(Terminus2):
     """
@@ -228,14 +219,7 @@ class TerminusKira(Terminus2):
     TerminusKira uses the `tools` parameter in LLM API calls for structured outputs.
     """
 
-    def __new__(cls, *args, disable_kira: bool = False, **kwargs):
-        # ponytail: returning a plain Terminus2 skips every KIRA override at once;
-        # __init__ below is not called for the returned Terminus2 instance.
-        if disable_kira:
-            return Terminus2(*args, **kwargs)
-        return super().__new__(cls)
-
-    def __init__(self, *args, disable_kira: bool = False, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._marker_seq = 0
         self._total_time_saved = 0.0
@@ -263,26 +247,24 @@ class TerminusKira(Terminus2):
             marker = f"{_MARKER_PREFIX}{self._marker_seq}__"
             start = time.monotonic()
 
-            # TODO: tmux send key 가 너무 긴 코드를 넣어주면 안들어가는 문제
-            for i in range(0, len(command.keystrokes), _SEND_CHUNK_BYTES):
-                await session.send_keys(
-                    command.keystrokes[i:i + _SEND_CHUNK_BYTES],
-                    block=False,
-                    min_timeout_sec=0.0,
-                )
-            # TODO: 지우기 - 일부 줄바꿈 붙지 않는 response 가 있어서 marker가 커맨드 뒤에 이에붙음
-            send_marker = command.keystrokes.endswith("\n")
-            if send_marker:
-                await session.send_keys(
-                    f"echo '{marker}'\n",
-                    block=False,
-                    min_timeout_sec=0.0,
-                )
+            # Send the command
+            await session.send_keys(
+                command.keystrokes,
+                block=False,
+                min_timeout_sec=0.0,
+            )
+            # Send marker: will execute when shell returns after command
+            await session.send_keys(
+                f"echo '{marker}'\n",
+                block=False,
+                min_timeout_sec=0.0,
+            )
 
             # Poll for marker, exit early if found before duration
             await asyncio.sleep(min(0.3, command.duration_sec))
             while time.monotonic() - start < command.duration_sec:
-                if send_marker and marker in await session.capture_pane():
+                pane_content = await session.capture_pane()
+                if marker in pane_content:
                     break
                 await asyncio.sleep(0.5)
 
@@ -348,8 +330,7 @@ class TerminusKira(Terminus2):
             "- Have you verified your solution from the all perspectives of a test engineer, a QA engineer, and the user who requested this task?\n" \
             "  - test engineer [TODO/DONE]\n" \
             "  - QA engineer [TODO/DONE]\n" \
-            "  - user who requested this task [TODO/DONE]\n" \
-            "- If you deleted, moved, or regenerated the graded artifact (file/service/port) after verifying it, that verification is void. Re-run a command with execute_commands to confirm the artifact still exists and is correct right now — do not rely on memory — before calling task_complete. [TODO/DONE]\n\n" \
+            "  - user who requested this task [TODO/DONE]\n\n" \
             "After this point, solution grading will begin and no further edits will be possible. If everything looks good, call task_complete tool again."
         )
 
@@ -430,21 +411,6 @@ class TerminusKira(Terminus2):
                 self.logger.warning(f"Failed to parse tool arguments: {arguments_str}")
                 continue
 
-            # Missing/misnamed fields would otherwise be filled with defaults and
-            # silently no-op, which the model reads as a dead terminal rather than
-            # its own mistake. Validate against the schema we already advertise.
-            schema = _TOOL_SCHEMAS.get(function_name)
-            if schema is not None:
-                try:
-                    jsonschema.validate(arguments, schema)
-                except jsonschema.ValidationError as e:
-                    feedback = (
-                        f"WARNINGS: Invalid arguments for '{function_name}': "
-                        f"{e.message}. Nothing was executed."
-                    )
-                    self.logger.warning(feedback)
-                    continue
-
             if function_name == "execute_commands":
                 # Extract analysis and plan
                 analysis = arguments.get("analysis", "")
@@ -453,11 +419,12 @@ class TerminusKira(Terminus2):
                 # Extract commands array
                 cmds = arguments.get("commands", [])
                 for cmd in cmds:
+                    keystrokes = cmd.get("keystrokes", "")
                     duration = cmd.get("duration", 1.0)
                     commands.append(
                         Command(
-                            keystrokes=cmd["keystrokes"],
-                            duration_sec=min(duration, _MAX_DURATION_SEC),
+                            keystrokes=keystrokes,
+                            duration_sec=min(duration, 60),
                         )
                     )
             elif function_name == "task_complete":
@@ -688,7 +655,6 @@ class TerminusKira(Terminus2):
             tool_calls=tool_calls,
             reasoning_content=reasoning_content,
             usage=usage_info,
-            finish_reason=finish_reason,
         )
 
     async def _handle_llm_interaction(
@@ -715,21 +681,7 @@ class TerminusKira(Terminus2):
 
         try:
             start_time = time.time()
-            # Gemini intermittently returns an empty response (no content, no
-            # tool calls) when its non-configurable prompt-level safety filter
-            # blocks the request with blockReason=PROHIBITED_CONTENT. On
-            # security tasks (crypto, vuln, password recovery) this fires on a
-            # large fraction of calls. It is stochastic and independent per call
-            # even at temperature 0, so retrying the identical request clears it;
-            # safety_settings cannot disable this block. 6 tries keeps the
-            # per-episode block-through probability low without burning the step.
-            for _ in range(6):
-                tool_response = await self._call_llm_with_tools(messages)
-                if tool_response.content or tool_response.tool_calls:
-                    break
-                self.logger.warning(
-                    f"Empty LLM response (finish_reason={tool_response.finish_reason}), retrying"
-                )
+            tool_response = await self._call_llm_with_tools(messages)
             end_time = time.time()
             request_time_ms = (end_time - start_time) * 1000
             self._api_request_times.append(request_time_ms)
@@ -739,9 +691,8 @@ class TerminusKira(Terminus2):
             if tool_response.tool_calls:
                 assistant_message["tool_calls"] = tool_response.tool_calls
 
-            if tool_response.content or tool_response.tool_calls:
-                chat._messages.append({"role": "user", "content": prompt})
-                chat._messages.append(assistant_message)
+            chat._messages.append({"role": "user", "content": prompt})
+            chat._messages.append(assistant_message)
 
             # Add tool result messages for each tool call (required by OpenAI API)
             if tool_response.tool_calls:
